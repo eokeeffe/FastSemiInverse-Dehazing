@@ -17,7 +17,7 @@
 
 #define DEBUG
 //#define DEBUG_DIFFERENCE
-#define DEBUG_ALE
+//#define DEBUG_ALE
 
 using namespace std;
 using namespace cv;
@@ -251,34 +251,6 @@ void AlphaBlend(const Mat& imgFore, Mat& imgDst, const Mat& alpha)
     blend.copyTo(imgDst);
 }
 
-cv::Mat weightedBlend(const cv::Mat &img1, const cv::Mat &img2, const cv::Mat &mask) {
-    assert((img1.type() == CV_8UC1 && img2.type() == CV_8UC1) ||
-           (img1.type() == CV_8UC3 && img2.type() == CV_8UC3));
-    assert(mask.type() == CV_8UC1);
-    assert(img1.rows == mask.rows && img1.cols == mask.cols);
-    assert(img2.rows == mask.rows && img2.cols == mask.cols);
-
-    cv::Mat res(img1.rows, img1.cols, img1.type());
-    const int nChannels = img1.channels();
-
-    for (int iRow = 0; iRow < mask.rows; ++iRow) {
-        const uchar *pImg1Row = img1.ptr<uchar>(iRow);
-        const uchar *pImg2Row = img2.ptr<uchar>(iRow);
-        const uchar *pMaskRow = mask.ptr<uchar>(iRow);
-        uchar *pResRow = res.ptr<uchar>(iRow);
-
-        for (int iCol = 0; iCol < mask.cols; ++iCol) {
-            float w = pMaskRow[iCol] / 255.0;
-            for (int iChan = 0; iChan < nChannels; ++iChan) {
-                int iChanElem = nChannels * iCol + iChan;
-                pResRow[iChanElem] = roundf(w * pImg1Row[iChanElem] + (1-w) * pImg2Row[iChanElem]);
-            }
-        }
-    }
-
-    return res;
-}
-
 cv::Mat dehaze(cv::Mat& image,cv::Mat &inverse,cv::Mat& difference,cv::Point ale,int k,int rho,double xi)
 {
      cv::Mat output = cv::Mat(image.rows,image.cols,image.type());
@@ -296,35 +268,27 @@ cv::Mat dehaze(cv::Mat& image,cv::Mat &inverse,cv::Mat& difference,cv::Point ale
          cv::Mat layer=image.clone();
          
          cv::Mat inv;
-//         if(i==0)
-//         {
-//            inv = inverseImage(layer);
-//         }
-//         else
-//         {
-             std::vector<cv::Mat> channels;
-             inv = increaseInverse(layer,xi);
-             split(inv,channels);
-             //layer-=(ci[i]*ale_temp);
-             channels[0] -= (ci[i]*ale_temp);
-             channels[1] -= (ci[i]*ale_temp);
-             channels[2] -= (ci[i]*ale_temp);
-             merge(channels,inv);
+         std::vector<cv::Mat> channels;
+         inv = increaseInverse(layer,xi);
+         split(inv,channels);
+         //layer-=(ci[i]*ale_temp);
+         channels[0] -= (ci[i]*ale_temp);
+         channels[1] -= (ci[i]*ale_temp);
+         channels[2] -= (ci[i]*ale_temp);
+         merge(channels,inv);
              
-             xi+=0.05;
-             ale = airlight_estimation(layer);
-             ale_temp= layer.at<float>(ale);
-//         }
+         xi+=0.10;
+         ale = airlight_estimation(layer);
+         ale_temp= layer.at<float>(ale);
+
          cv::Mat diff = haze_difference(layer,inv,rho);
          
 
          #ifdef DEBUG
-             cv::Mat in,d,l;
-             cv::normalize(layer, l, 0, 255, NORM_MINMAX, CV_32FC3);
+             cv::Mat in,d;
              cv::normalize(inv, in, 0, 255, NORM_MINMAX, CV_32FC3);
              cv::normalize(diff, d, 0, 255, NORM_MINMAX, CV_32FC3);
              //cv::normalize(mask, m, 0, 255, NORM_MINMAX, CV_32FC3);
-             imwrite("layer_"+to_string(i)+".jpg",l);
              imwrite("layer_inv_"+to_string(i)+".jpg",in);
              imwrite("difference_"+to_string(i)+".jpg",d);
          #endif
@@ -336,8 +300,10 @@ cv::Mat dehaze(cv::Mat& image,cv::Mat &inverse,cv::Mat& difference,cv::Point ale
         float weight=(float)count/layers.size();
         
         addWeighted(layers[count],ci[count],output,ci[opp],0.0,output);
-        //AlphaBlend(layers[count],output,mask_layers[count]);
+        AlphaBlend(layers[count],output,mask_layers[count]);
      }
+     mask_layers[0] = 255 - mask_layers[0];
+     AlphaBlend(image,output,mask_layers[0]);
      return output;
 }
 
@@ -368,15 +334,11 @@ int main(int argc,char *argv[])
     
     cv::Point ale = airlight_estimation(input);
     cv::Mat dehazed = dehaze(input,inverse,difference,ale,k,rho,xi);
-    cv::Mat transmission = transmissionMap(dehazed,ale);
 
     cout<<"Haze@:"<<haze<<"%"<<endl;
     
     imwrite("reg.jpg",input);
-    //cv::normalize(dehazed, dehazed, 0, 255, NORM_MINMAX, CV_32FC3);
     imwrite("dehazed.jpg",dehazed);
-    //cv::normalize(transmission, transmission, 0, 255, NORM_MINMAX, CV_32FC3);
-    imwrite("transmission.jpg",transmission);
 
     return 0;
 }
