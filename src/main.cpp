@@ -103,7 +103,7 @@ struct Generator
 cv::Mat inverseImage(cv::Mat& image)
 {
     image.convertTo(image,CV_32F);
-    cv::normalize(image, image, 0, 1.0, NORM_MINMAX, CV_32FC3);
+    //cv::normalize(image, image, 0, 1.0, NORM_MINMAX, CV_32FC3);
     
     cv::Mat output = cv::Mat(image.rows,image.cols,image.type());
     std::vector<cv::Mat> channels;
@@ -115,9 +115,9 @@ cv::Mat inverseImage(cv::Mat& image)
             float b1=channels[0].at<float>(i,j),
                     g1=channels[1].at<float>(i,j),
                     r1=channels[2].at<float>(i,j);
-            float b2=saturate_cast<float>(1.0-channels[0].at<float>(i,j)),
-                    g2=saturate_cast<float>(1.0-channels[1].at<float>(i,j)),
-                    r2=saturate_cast<float>(1.0-channels[2].at<float>(i,j));
+            float b2=saturate_cast<float>(255-channels[0].at<float>(i,j)),
+                    g2=saturate_cast<float>(255-channels[1].at<float>(i,j)),
+                    r2=saturate_cast<float>(255-channels[2].at<float>(i,j));
             output.at<Vec3f>(i,j)[0] = max(b1,b2);
             output.at<Vec3f>(i,j)[1] = max(g1,g2);
             output.at<Vec3f>(i,j)[2] = max(r1,r2);
@@ -128,22 +128,22 @@ cv::Mat inverseImage(cv::Mat& image)
     return output;
 }
 
-cv::Mat increaseInverse(cv::Mat& inverse,float xi)
+cv::Mat increaseInverse(cv::Mat inverse,float xi)
 {
-    inverse.convertTo(inverse,CV_32F);
-    cv::normalize(inverse, inverse, 0, 1.0, NORM_MINMAX, CV_32FC3);
+    //inverse.convertTo(inverse,CV_32F);
+    //cv::normalize(inverse, inverse, 0, 1.0, NORM_MINMAX, CV_32FC3);
     cv::Mat output = cv::Mat(inverse.rows,inverse.cols,inverse.type());
     for(int i=0;i<inverse.rows;i++)
     {
         for(int j=0;j<inverse.cols;j++)
         {
-            output.at<Vec3f>(i,j)[0] = max(inverse.at<Vec3f>(i,j)[0],xi*(1-inverse.at<Vec3f>(i,j)[0]));
-            output.at<Vec3f>(i,j)[1] = max(inverse.at<Vec3f>(i,j)[1],xi*(1-inverse.at<Vec3f>(i,j)[1]));
-            output.at<Vec3f>(i,j)[2] = max(inverse.at<Vec3f>(i,j)[2],xi*(1-inverse.at<Vec3f>(i,j)[2]));
+            output.at<Vec3f>(i,j)[0] = max((float)inverse.at<Vec3f>(i,j)[0],xi*(float)(255.0-inverse.at<Vec3f>(i,j)[0]));
+            output.at<Vec3f>(i,j)[1] = max((float)inverse.at<Vec3f>(i,j)[1],xi*(float)(255.0-inverse.at<Vec3f>(i,j)[1]));
+            output.at<Vec3f>(i,j)[2] = max((float)inverse.at<Vec3f>(i,j)[2],xi*(float)(255.0-inverse.at<Vec3f>(i,j)[2]));
         }
     }
-    cv::normalize(output, output, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
-    cv::normalize(inverse, inverse, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
+    //cv::normalize(output, output, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
+    //cv::normalize(inverse, inverse, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
     return output;
 }
 
@@ -174,7 +174,7 @@ cv::Mat haze_difference(cv::Mat& image,cv::Mat& inverse, int rho)
 
     //subtract(h2,h1,diff,noArray(),CV_32FC1);
     absdiff(channels2[0],channels[0],diff);
-    threshold( diff, diff, rho, 255, 0);
+    threshold( diff, diff, rho, 255, 1);
     return diff;
 }
 
@@ -243,7 +243,7 @@ void AlphaBlend(const Mat& imgFore, Mat& imgDst, const Mat& alpha)
 {
     vector<Mat> vAlpha;
     Mat imgAlpha3;
-    for(int i = 0; i < 3; i++) vAlpha.push_back(alpha);
+    for(int i = 0; i < 3; i++) {vAlpha.push_back(alpha);}
     merge(vAlpha,imgAlpha3);
 
     Mat blend = imgFore.mul(imgAlpha3,1.0/255) +
@@ -251,7 +251,35 @@ void AlphaBlend(const Mat& imgFore, Mat& imgDst, const Mat& alpha)
     blend.copyTo(imgDst);
 }
 
-cv::Mat dehaze(cv::Mat& image,cv::Mat& difference,cv::Point ale,int k,int rho,double xi)
+cv::Mat weightedBlend(const cv::Mat &img1, const cv::Mat &img2, const cv::Mat &mask) {
+    assert((img1.type() == CV_8UC1 && img2.type() == CV_8UC1) ||
+           (img1.type() == CV_8UC3 && img2.type() == CV_8UC3));
+    assert(mask.type() == CV_8UC1);
+    assert(img1.rows == mask.rows && img1.cols == mask.cols);
+    assert(img2.rows == mask.rows && img2.cols == mask.cols);
+
+    cv::Mat res(img1.rows, img1.cols, img1.type());
+    const int nChannels = img1.channels();
+
+    for (int iRow = 0; iRow < mask.rows; ++iRow) {
+        const uchar *pImg1Row = img1.ptr<uchar>(iRow);
+        const uchar *pImg2Row = img2.ptr<uchar>(iRow);
+        const uchar *pMaskRow = mask.ptr<uchar>(iRow);
+        uchar *pResRow = res.ptr<uchar>(iRow);
+
+        for (int iCol = 0; iCol < mask.cols; ++iCol) {
+            float w = pMaskRow[iCol] / 255.0;
+            for (int iChan = 0; iChan < nChannels; ++iChan) {
+                int iChanElem = nChannels * iCol + iChan;
+                pResRow[iChanElem] = roundf(w * pImg1Row[iChanElem] + (1-w) * pImg2Row[iChanElem]);
+            }
+        }
+    }
+
+    return res;
+}
+
+cv::Mat dehaze(cv::Mat& image,cv::Mat &inverse,cv::Mat& difference,cv::Point ale,int k,int rho,double xi)
 {
      cv::Mat output = cv::Mat(image.rows,image.cols,image.type());
      float c = 1.0/k;
@@ -262,50 +290,53 @@ cv::Mat dehaze(cv::Mat& image,cv::Mat& difference,cv::Point ale,int k,int rho,do
      vector<cv::Mat> mask_layers;
      vector<cv::Mat> diff_layers;
      Vec3f ale_temp= image.at<cv::Vec3f>(ale);
-
+     //std::cout<<ci.size()<<std::endl;
      for(int i=0;i<ci.size();i++)
      {
          cv::Mat layer=image.clone();
-         std::vector<cv::Mat> channels;
-         split(layer,channels);
-         //layer-=(ci[i]*ale_temp);
-         channels[0]-=(ci[i]*ale_temp);
-         channels[1]-=(ci[i]*ale_temp);
-         channels[2]-=(ci[i]*ale_temp);
-         merge(channels,layer);
-         cv::Mat inverse;
-         if(i==0)
-         {
-            inverse = inverseImage(layer);
-         }
-         else
-         {
-            inverse = increaseInverse(layer,xi);
-            xi+=0.3;
-         }
-         cv::Mat diff = haze_difference(layer,inverse,rho);
-         //ale = airlight_estimation(layer);
-         //ale_temp= image.at<float>(ale);
+         
+         cv::Mat inv;
+//         if(i==0)
+//         {
+//            inv = inverseImage(layer);
+//         }
+//         else
+//         {
+             std::vector<cv::Mat> channels;
+             inv = increaseInverse(layer,xi);
+             split(inv,channels);
+             //layer-=(ci[i]*ale_temp);
+             channels[0] -= (ci[i]*ale_temp);
+             channels[1] -= (ci[i]*ale_temp);
+             channels[2] -= (ci[i]*ale_temp);
+             merge(channels,inv);
+             
+             xi+=0.05;
+             ale = airlight_estimation(layer);
+             ale_temp= layer.at<float>(ale);
+//         }
+         cv::Mat diff = haze_difference(layer,inv,rho);
+         
 
          #ifdef DEBUG
-             cv::Mat inv,d,l;
+             cv::Mat in,d,l;
              cv::normalize(layer, l, 0, 255, NORM_MINMAX, CV_32FC3);
-             cv::normalize(inverse, inv, 0, 255, NORM_MINMAX, CV_32FC3);
+             cv::normalize(inv, in, 0, 255, NORM_MINMAX, CV_32FC3);
              cv::normalize(diff, d, 0, 255, NORM_MINMAX, CV_32FC3);
              //cv::normalize(mask, m, 0, 255, NORM_MINMAX, CV_32FC3);
              imwrite("layer_"+to_string(i)+".jpg",l);
-             imwrite("layer_inv_"+to_string(i)+".jpg",inv);
+             imwrite("layer_inv_"+to_string(i)+".jpg",in);
              imwrite("difference_"+to_string(i)+".jpg",d);
          #endif
-         layers.push_back(layer);
+         layers.push_back(inv);
          mask_layers.push_back(diff);
      }
-     for(int count=layers.size()-1;count>-1;count--)
+     for(int count=layers.size()-1,opp=0;count>-1;count--,opp++)
      {
         float weight=(float)count/layers.size();
         
-        //addWeighted(layers[count],ci[count],output,1.0-ci[count],0.0,output);
-        AlphaBlend(layers[count],output,mask_layers[count]);
+        addWeighted(layers[count],ci[count],output,ci[opp],0.0,output);
+        //AlphaBlend(layers[count],output,mask_layers[count]);
      }
      return output;
 }
@@ -336,7 +367,7 @@ int main(int argc,char *argv[])
     float haze = detect_haze(difference,rho);
     
     cv::Point ale = airlight_estimation(input);
-    cv::Mat dehazed = dehaze(input,difference,ale,k,rho,xi);
+    cv::Mat dehazed = dehaze(input,inverse,difference,ale,k,rho,xi);
     cv::Mat transmission = transmissionMap(dehazed,ale);
 
     cout<<"Haze@:"<<haze<<"%"<<endl;
