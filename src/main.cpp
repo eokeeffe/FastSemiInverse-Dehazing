@@ -15,7 +15,7 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 
-#define DEBUG
+//#define DEBUG
 //#define DEBUG_DIFFERENCE
 //#define DEBUG_ALE
 
@@ -63,18 +63,20 @@ double* getRange(cv::Mat& input)
     return vals;
 }
 
-cv::Point getMax(cv::Mat& input)
+cv::Point getMax(cv::Mat& input,cv::Mat mask)
 {
     /*
         Max and min value of matrix
-        More robust
+        More robust with added gaussian blurring
+        only search the area of the mask (area of haze)
     */
+    mask.convertTo(mask,CV_8U);
     cv::Mat gray;
     cvtColor(input,gray,CV_BGR2GRAY);
     GaussianBlur(gray,gray,Size(11,11),1,1,0);
     double *vals = new double[2];
     cv::Point min,max;
-    minMaxLoc(gray,&vals[1],&vals[2],&min,&max);
+    minMaxLoc(gray,&vals[1],&vals[2],&min,&max,mask);
     return max;
 }
 
@@ -100,11 +102,12 @@ struct Generator
 };
 
 //end of Utilities
-cv::Mat inverseImage(cv::Mat& image)
+cv::Mat semiInverse(cv::Mat& image)
 {
+    /*
+    *   Create the semi inverse of the input image
+    */
     image.convertTo(image,CV_32F);
-    //cv::normalize(image, image, 0, 1.0, NORM_MINMAX, CV_32FC3);
-    
     cv::Mat output = cv::Mat(image.rows,image.cols,image.type());
     std::vector<cv::Mat> channels;
     split(image,channels);
@@ -128,10 +131,13 @@ cv::Mat inverseImage(cv::Mat& image)
     return output;
 }
 
-cv::Mat increaseInverse(cv::Mat inverse,float xi)
+cv::Mat semiIncrease(cv::Mat inverse,float xi)
 {
-    //inverse.convertTo(inverse,CV_32F);
-    //cv::normalize(inverse, inverse, 0, 1.0, NORM_MINMAX, CV_32FC3);
+    /*
+    *   Get the semi inverse of the image, only add xi
+    *   to the semi inverse component, chnages the mask area
+    */
+    inverse.convertTo(inverse,CV_32F);
     cv::Mat output = cv::Mat(inverse.rows,inverse.cols,inverse.type());
     for(int i=0;i<inverse.rows;i++)
     {
@@ -142,15 +148,15 @@ cv::Mat increaseInverse(cv::Mat inverse,float xi)
             output.at<Vec3f>(i,j)[2] = max((float)inverse.at<Vec3f>(i,j)[2],xi*(float)(255.0-inverse.at<Vec3f>(i,j)[2]));
         }
     }
-    //cv::normalize(output, output, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
-    //cv::normalize(inverse, inverse, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
+    cv::normalize(output, output, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
+    cv::normalize(inverse, inverse, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
     return output;
 }
 
 cv::Mat haze_difference(cv::Mat& image,cv::Mat& inverse, int rho)
 {
     /**
-    *   Binary Version now working
+    *   Create a binary mask of the haze areas
     **/
     cv::Mat hsv1,hsv2;
     vector<cv::Mat> channels(3),channels2(3);
@@ -173,15 +179,15 @@ cv::Mat haze_difference(cv::Mat& image,cv::Mat& inverse, int rho)
     #endif
 
     //subtract(h2,h1,diff,noArray(),CV_32FC1);
-    absdiff(channels2[0],channels[0],diff);
-    threshold( diff, diff, rho, 255, 1);
+    absdiff(channels2[0],channels[0],diff);//get the difference between the H channels
+    threshold( diff, diff, rho, 255, 1);//use the inverse binary threshold, the low value is anything below rho
     return diff;
 }
 
 float detect_haze(cv::Mat difference,int rho)
 {
     /*
-        return percentage haze in image
+        return percentage haze in image, uses the mask
     */
     int count=0;
     for(int i=0;i<difference.rows;i++)
@@ -198,12 +204,12 @@ float detect_haze(cv::Mat difference,int rho)
     return (float)count/(difference.rows*difference.cols)*100;
 }
 
-cv::Point airlight_estimation(cv::Mat& input)
+cv::Point airlight_estimation(cv::Mat& input,cv::Mat& mask)
 {
     /*
         get the brightest pixel value and return it
     */
-    cv::Point max = getMax(input);
+    cv::Point max = getMax(input,mask);
 
     #ifdef DEBUG_ALE
         Vec3f ale = input.at<cv::Vec3f>(max);
@@ -232,7 +238,7 @@ cv::Mat transmissionMap(cv::Mat& input,cv::Point max)
     {
         for(int j=0;j<transmission.cols;j++)
         {
-            transmission.at<float>(i,j)=(1-w*input.at<float>(i,j)/ale)*255.0;
+            transmission.at<Vec3f>(i,j)=(1-w*input.at<float>(i,j)/ale)*255.0;
         }
     }
     cv::normalize(transmission, transmission, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
@@ -269,7 +275,7 @@ cv::Mat dehaze(cv::Mat& image,cv::Mat &inverse,cv::Mat& difference,cv::Point ale
          
          cv::Mat inv;
          std::vector<cv::Mat> channels;
-         inv = increaseInverse(layer,xi);
+         inv = semiIncrease(layer,xi);
          split(inv,channels);
          //layer-=(ci[i]*ale_temp);
          channels[0] -= (ci[i]*ale_temp);
@@ -278,10 +284,9 @@ cv::Mat dehaze(cv::Mat& image,cv::Mat &inverse,cv::Mat& difference,cv::Point ale
          merge(channels,inv);
              
          xi+=0.10;
-         ale = airlight_estimation(layer);
-         ale_temp= layer.at<float>(ale);
-
          cv::Mat diff = haze_difference(layer,inv,rho);
+         ale = airlight_estimation(layer,diff);
+         ale_temp= layer.at<float>(ale);
          
 
          #ifdef DEBUG
@@ -303,6 +308,7 @@ cv::Mat dehaze(cv::Mat& image,cv::Mat &inverse,cv::Mat& difference,cv::Point ale
         AlphaBlend(layers[count],output,mask_layers[count]);
      }
      mask_layers[0] = 255 - mask_layers[0];
+     addWeighted(image,ci[layers.size()-1],output,ci[0],0.0,output);
      AlphaBlend(image,output,mask_layers[0]);
      return output;
 }
@@ -326,13 +332,13 @@ int main(int argc,char *argv[])
     }
     cout<<rho<<","<<xi<<","<<k<<endl;
 
-    cv::Mat inverse = inverseImage(input);
+    cv::Mat inverse = semiInverse(input);
     
     cv::Mat difference = haze_difference(input,inverse,rho);
     
     float haze = detect_haze(difference,rho);
     
-    cv::Point ale = airlight_estimation(input);
+    cv::Point ale = airlight_estimation(input,difference);
     cv::Mat dehazed = dehaze(input,inverse,difference,ale,k,rho,xi);
 
     cout<<"Haze@:"<<haze<<"%"<<endl;
