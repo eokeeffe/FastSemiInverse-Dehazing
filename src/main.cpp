@@ -16,7 +16,7 @@
 #include <opencv2/highgui.hpp>
 
 #define DEBUG
-#define DEBUG_DIFFERENCE
+//#define DEBUG_DIFFERENCE
 #define DEBUG_ALE
 
 using namespace std;
@@ -78,6 +78,8 @@ cv::Point getMax(cv::Mat& input)
     return max;
 }
 
+
+
 template <class ForwardIterator,class Generator>
 void generate(ForwardIterator first,ForwardIterator last,Generator g)
 {
@@ -100,121 +102,56 @@ struct Generator
 //end of Utilities
 cv::Mat inverseImage(cv::Mat& image)
 {
+    image.convertTo(image,CV_32F);
+    cv::normalize(image, image, 0, 1.0, NORM_MINMAX, CV_32FC3);
+    
     cv::Mat output = cv::Mat(image.rows,image.cols,image.type());
-    vector<cv::Mat> channels(3);
-    split(image,channels);
-    //cout<< channels[0] <<endl;
-    for(int i=0;i<image.rows;i++)
-    {
-        for(int j=0;j<image.cols;j++)
-        {
-            float v1=channels[0].at<float>(i,j),
-                  v2=channels[1].at<float>(i,j),
-                  v3=channels[2].at<float>(i,j);
-            float b=saturate_cast<float>(1.0-channels[0].at<float>(i,j)),
-            g=saturate_cast<float>(1.0-channels[1].at<float>(i,j)),
-            r=saturate_cast<float>(1.0-channels[2].at<float>(i,j));
-            channels[0].at<float>(i,j) = max(v1,b);
-            channels[1].at<float>(i,j) = max(v2,g);
-            channels[2].at<float>(i,j) = max(v3,r);
-        }
-    }
-    #ifdef DEBUG_INV
-        double *a=getRange(channels[0]),
-        *b=getRange(channels[1]),
-        *c=getRange(channels[2]);
-        cout<<fixed<<setprecision(10)<<a[0]<<","<<a[1]<<endl;
-        cout<<fixed<<setprecision(10)<<b[0]<<","<<b[1]<<endl;
-        cout<<fixed<<setprecision(10)<<c[0]<<","<<c[1]<<endl;
-    #endif
-    merge(channels,output);
-    cv::normalize(output, output, 0.0, 1.0, NORM_MINMAX, CV_32FC3);
-    return output;
-}
-
-cv::Mat inverseImageMaskd(cv::Mat& image,cv::Mat& difference,int rho,double xi)
-{
-    cv::Mat output = cv::Mat(image.rows,image.cols,image.type());
-    vector<cv::Mat> channels(3);
+    std::vector<cv::Mat> channels;
     split(image,channels);
     for(int i=0;i<image.rows;i++)
     {
         for(int j=0;j<image.cols;j++)
         {
-            if(difference.at<float>(i,j)>rho)
-            {
-                float v1=channels[0].at<float>(i,j),
-                      v2=channels[1].at<float>(i,j),
-                      v3=channels[2].at<float>(i,j);
-                float b=saturate_cast<float>(1.0-channels[0].at<float>(i,j)),
-                g=saturate_cast<float>(1.0-channels[1].at<float>(i,j)),
-                r=saturate_cast<float>(1.0-channels[2].at<float>(i,j));
-                float diff = difference.at<float>(i,j);
-
-                channels[0].at<float>(i,j) = (diff*xi)+max(v1,b);
-                channels[1].at<float>(i,j) = max(v2,g);
-                channels[2].at<float>(i,j) = max(v3,r);
-            }
-            else if(difference.at<float>(i,j)<rho)
-            {
-                float v1=channels[0].at<float>(i,j),
-                      v2=channels[1].at<float>(i,j),
-                      v3=channels[2].at<float>(i,j);
-                float b=saturate_cast<float>(1.0-channels[0].at<float>(i,j)),
-                g=saturate_cast<float>(1.0-channels[1].at<float>(i,j)),
-                r=saturate_cast<float>(1.0-channels[2].at<float>(i,j));
-
-                channels[0].at<float>(i,j) = max(v1,b);
-                channels[1].at<float>(i,j) = max(v2,g);
-                channels[2].at<float>(i,j) = max(v3,r);
-            }
+            float b1=channels[0].at<float>(i,j),
+                    g1=channels[1].at<float>(i,j),
+                    r1=channels[2].at<float>(i,j);
+            float b2=saturate_cast<float>(1.0-channels[0].at<float>(i,j)),
+                    g2=saturate_cast<float>(1.0-channels[1].at<float>(i,j)),
+                    r2=saturate_cast<float>(1.0-channels[2].at<float>(i,j));
+            output.at<Vec3f>(i,j)[0] = max(b1,b2);
+            output.at<Vec3f>(i,j)[1] = max(g1,g2);
+            output.at<Vec3f>(i,j)[2] = max(r1,r2);
         }
     }
-    //output = xi+output;
-    merge(channels,output);
-    #ifdef DEBUG_INV_MASK
-        double *a=getRange(channels[0]),
-        *b=getRange(channels[1]),
-        *c=getRange(channels[2]);
-        cout<<fixed<<setprecision(10)<<a[0]<<","<<a[1]<<endl;
-        cout<<fixed<<setprecision(10)<<b[0]<<","<<b[1]<<endl;
-        cout<<fixed<<setprecision(10)<<c[0]<<","<<c[1]<<endl;
-    #endif
-    cv::normalize(output, output, 0.0, 1.0, NORM_MINMAX, CV_32FC3);
+    cv::normalize(output, output, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
+    cv::normalize(image, image, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
     return output;
 }
 
-cv::Mat inverseImageMask(cv::Mat& image,cv::Mat& difference,int rho,double xi)
+cv::Mat increaseInverse(cv::Mat& inverse,float xi)
 {
-    cv::Mat output = cv::Mat(image.rows,image.cols,image.type());
-    vector<cv::Mat> channels(3);
-    float *input=(float*)(image.data);
-    split(image,channels);
-
-    for(int i=0;i<image.rows;i++)
+    inverse.convertTo(inverse,CV_32F);
+    cv::normalize(inverse, inverse, 0, 1.0, NORM_MINMAX, CV_32FC3);
+    cv::Mat output = cv::Mat(inverse.rows,inverse.cols,inverse.type());
+    for(int i=0;i<inverse.rows;i++)
     {
-        for(int j=0;j<image.cols;j++)
+        for(int j=0;j<inverse.cols;j++)
         {
-            if(difference.at<float>(i,j)>=rho)
-            {
-                channels[0].at<float>(i,j) = 255.0;
-                channels[1].at<float>(i,j) = 0;
-                channels[2].at<float>(i,j) = 0;
-            }
+            output.at<Vec3f>(i,j)[0] = max(inverse.at<Vec3f>(i,j)[0],xi*(1-inverse.at<Vec3f>(i,j)[0]));
+            output.at<Vec3f>(i,j)[1] = max(inverse.at<Vec3f>(i,j)[1],xi*(1-inverse.at<Vec3f>(i,j)[1]));
+            output.at<Vec3f>(i,j)[2] = max(inverse.at<Vec3f>(i,j)[2],xi*(1-inverse.at<Vec3f>(i,j)[2]));
         }
     }
-    //output = xi+output;
-    merge(channels,output);
-    #ifdef DEBUG_INV_MASK
-        imwrite("before_weight.jpg",output);
-    #endif
-    cv::normalize(output, output, 0.0, 1.0, NORM_MINMAX, CV_32FC3);
-    addWeighted(output,0.5,image,0.5,0,output);
+    cv::normalize(output, output, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
+    cv::normalize(inverse, inverse, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
     return output;
 }
 
-cv::Mat haze_difference(cv::Mat& image,cv::Mat& inverse)
+cv::Mat haze_difference(cv::Mat& image,cv::Mat& inverse, int rho)
 {
+    /**
+    *   Binary Version now working
+    **/
     cv::Mat hsv1,hsv2;
     vector<cv::Mat> channels(3),channels2(3);
 
@@ -227,23 +164,17 @@ cv::Mat haze_difference(cv::Mat& image,cv::Mat& inverse)
     cv::Mat h1=Mat::zeros(image.rows,image.cols,image.type());
     cv::Mat h2=Mat::zeros(image.rows,image.cols,image.type());
     cv::Mat diff=Mat::zeros(image.rows,image.cols,image.type());
-    /*
-        L*A*B to L*C*H
-        can be accomplished by
-        L = L
-        C = sqrt(pow(a,2)+pow(b,2))
-        H = arctan(b,a)
-    */
+    
     #ifdef DEBUG_DIFFERENCE
-        cv::normalize(channels[0], channels[0], 0, 255, NORM_MINMAX, CV_32FC3);
-        cv::normalize(channels2[0], channels2[0], 0, 255, NORM_MINMAX, CV_32FC3);
+        //cv::normalize(channels[0], channels[0], 0, 255, NORM_MINMAX, CV_32FC3);
+        //cv::normalize(channels2[0], channels2[0], 0, 255, NORM_MINMAX, CV_32FC3);
         imwrite("h1.jpg",channels[0]);
-        imwrite("h2.jpg",channels[0]);
+        imwrite("h2.jpg",channels2[0]);
     #endif
 
     //subtract(h2,h1,diff,noArray(),CV_32FC1);
     absdiff(channels2[0],channels[0],diff);
-
+    threshold( diff, diff, rho, 255, 0);
     return diff;
 }
 
@@ -267,7 +198,7 @@ float detect_haze(cv::Mat difference,int rho)
     return (float)count/(difference.rows*difference.cols)*100;
 }
 
-cv::Point airlight_estimation(cv::Mat& input,cv::Mat& mask)
+cv::Point airlight_estimation(cv::Mat& input)
 {
     /*
         get the brightest pixel value and return it
@@ -304,8 +235,20 @@ cv::Mat transmissionMap(cv::Mat& input,cv::Point max)
             transmission.at<float>(i,j)=(1-w*input.at<float>(i,j)/ale)*255.0;
         }
     }
-    cv::normalize(transmission, transmission, 0.0, 1.0, NORM_MINMAX, CV_32FC3);
+    cv::normalize(transmission, transmission, 0.0, 255.0, NORM_MINMAX, CV_32FC3);
     return transmission;
+}
+
+void AlphaBlend(const Mat& imgFore, Mat& imgDst, const Mat& alpha)
+{
+    vector<Mat> vAlpha;
+    Mat imgAlpha3;
+    for(int i = 0; i < 3; i++) vAlpha.push_back(alpha);
+    merge(vAlpha,imgAlpha3);
+
+    Mat blend = imgFore.mul(imgAlpha3,1.0/255) +
+                imgDst.mul(Scalar::all(255)-imgAlpha3,1.0/255);
+    blend.copyTo(imgDst);
 }
 
 cv::Mat dehaze(cv::Mat& image,cv::Mat& difference,cv::Point ale,int k,int rho,double xi)
@@ -323,33 +266,46 @@ cv::Mat dehaze(cv::Mat& image,cv::Mat& difference,cv::Point ale,int k,int rho,do
      for(int i=0;i<ci.size();i++)
      {
          cv::Mat layer=image.clone();
-
-         layer-=(ci[i]*ale_temp);
-         cv::Mat inverse = inverseImage(layer);
-         cv::Mat diff = haze_difference(layer,inverse);
-         cv::Mat mask = inverseImageMask(inverse,diff,rho,xi);
-         //ale = airlight_estimation(layer,mask);
+         std::vector<cv::Mat> channels;
+         split(layer,channels);
+         //layer-=(ci[i]*ale_temp);
+         channels[0]-=(ci[i]*ale_temp);
+         channels[1]-=(ci[i]*ale_temp);
+         channels[2]-=(ci[i]*ale_temp);
+         merge(channels,layer);
+         cv::Mat inverse;
+         if(i==0)
+         {
+            inverse = inverseImage(layer);
+         }
+         else
+         {
+            inverse = increaseInverse(layer,xi);
+            xi+=0.3;
+         }
+         cv::Mat diff = haze_difference(layer,inverse,rho);
+         //ale = airlight_estimation(layer);
          //ale_temp= image.at<float>(ale);
 
          #ifdef DEBUG
-             cv::Mat inv,m,l;
+             cv::Mat inv,d,l;
              cv::normalize(layer, l, 0, 255, NORM_MINMAX, CV_32FC3);
              cv::normalize(inverse, inv, 0, 255, NORM_MINMAX, CV_32FC3);
-             cv::normalize(mask, m, 0, 255, NORM_MINMAX, CV_32FC3);
+             cv::normalize(diff, d, 0, 255, NORM_MINMAX, CV_32FC3);
+             //cv::normalize(mask, m, 0, 255, NORM_MINMAX, CV_32FC3);
              imwrite("layer_"+to_string(i)+".jpg",l);
              imwrite("layer_inv_"+to_string(i)+".jpg",inv);
-             imwrite("layer_mask_"+to_string(i)+".jpg",m);
+             imwrite("difference_"+to_string(i)+".jpg",d);
          #endif
          layers.push_back(layer);
-         mask_layers.push_back(mask);
-         diff_layers.push_back(diff);
+         mask_layers.push_back(diff);
      }
      for(int count=layers.size()-1;count>-1;count--)
      {
-        cv::Mat temp=mask_layers[count];
-        //addWeighted(layers[count],1.0,mask_layers[count],1.0,0.0,temp);
-        float weight=(float)count/10.0;
-        addWeighted(output,weight,temp,1.0-weight,0.0,output);
+        float weight=(float)count/layers.size();
+        
+        //addWeighted(layers[count],ci[count],output,1.0-ci[count],0.0,output);
+        AlphaBlend(layers[count],output,mask_layers[count]);
      }
      return output;
 }
@@ -358,36 +314,37 @@ int main(int argc,char *argv[])
 {
     //inputs
     cv::Mat input = imread(argv[1]);
-    int rho = atoi(argv[2]);
-    double xi = atof(argv[3]);
-    double k = atoi(argv[4]);
-
+    double rho, k, xi;
+    if(argc<4)
+    {
+        rho=10;
+        xi=0.3;
+        k=5;
+    }
+    else
+    {
+        rho = atof(argv[2]);
+        xi = atof(argv[3]);
+        k = atof(argv[4]);
+    }
     cout<<rho<<","<<xi<<","<<k<<endl;
 
-    cv::Mat input_float;
-    input.convertTo(input_float,CV_32F);
-    cv::normalize(input_float, input_float, 0, 1.0, NORM_MINMAX, CV_32FC3);
-
-    cv::Mat inverse = inverseImage(input_float);
-    cv::Mat difference = haze_difference(input_float,inverse);
+    cv::Mat inverse = inverseImage(input);
+    
+    cv::Mat difference = haze_difference(input,inverse,rho);
+    
     float haze = detect_haze(difference,rho);
-    cv::Mat mask = inverseImageMask(inverse,difference,rho,xi);
-    cv::Point ale = airlight_estimation(input_float,mask);
-    cv::Mat dehazed = dehaze(input_float,difference,ale,k,rho,xi);
+    
+    cv::Point ale = airlight_estimation(input);
+    cv::Mat dehazed = dehaze(input,difference,ale,k,rho,xi);
     cv::Mat transmission = transmissionMap(dehazed,ale);
 
     cout<<"Haze@:"<<haze<<"%"<<endl;
-
-    cv::normalize(input_float, input_float, 0, 255, NORM_MINMAX, CV_32FC3);
+    
     imwrite("reg.jpg",input);
-    cv::normalize(inverse, inverse, 0, 255, NORM_MINMAX, CV_32FC3);
-    imwrite("inverse.jpg",inverse);
-    cv::normalize(difference, difference, 0, 255, NORM_MINMAX, CV_32FC3);
-    imwrite("difference.jpg",difference);
-    cv::normalize(mask, mask, 0, 255, NORM_MINMAX, CV_32FC3);
-    imwrite("mask.jpg",mask);
-    cv::normalize(dehazed, dehazed, 0, 255, NORM_MINMAX, CV_32FC3);
+    //cv::normalize(dehazed, dehazed, 0, 255, NORM_MINMAX, CV_32FC3);
     imwrite("dehazed.jpg",dehazed);
+    //cv::normalize(transmission, transmission, 0, 255, NORM_MINMAX, CV_32FC3);
     imwrite("transmission.jpg",transmission);
 
     return 0;
